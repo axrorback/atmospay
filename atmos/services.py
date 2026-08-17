@@ -2,7 +2,7 @@ import base64
 import logging
 import time
 import requests
-from datetime import datetime, timedelta
+
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
@@ -13,80 +13,92 @@ class AtmosService:
 
     @classmethod
     def get_token(cls):
-        consumer_key = getattr(settings, 'ATMOS_CONSUMER_KEY', '')
-        consumer_secret = getattr(settings, 'ATMOS_CONSUMER_SECRET', '')
+        consumer_key = settings.ATMOS_CONSUMER_KEY
+        consumer_secret = settings.ATMOS_CONSUMER_SECRET
 
         credentials = f"{consumer_key}:{consumer_secret}"
-        encoded_credentials = base64.b64encode(credentials.encode()).decode()
+        encoded_credentials = base64.b64encode(
+            credentials.encode()
+        ).decode()
 
-        headers = {
-            'Authorization': f'Basic {encoded_credentials}'
-        }
+        response = requests.post(
+            f"{cls.BASE_URL}/token?grant_type=client_credentials",
+            headers={
+                "Authorization": f"Basic {encoded_credentials}"
+            },
+            timeout=10
+        )
 
-        url = f"{cls.BASE_URL}/token?grant_type=client_credentials"
-        response = requests.post(url, headers=headers, timeout=10)
+        response.raise_for_status()
 
-        logger.info(f"Atmos Token Response [{response.status_code}]: {response.text}")
-
-        if response.status_code == 200:
-            return response.json().get('access_token')
-        raise Exception(f"Atmos Token Error: {response.status_code} - {response.text}")
+        return response.json()["access_token"]
 
     @classmethod
     def create_invoice(cls, order):
         token = cls.get_token()
-        headers = {
-            'Authorization': f'Bearer {token}',
-            'Content-Type': 'application/json'
-        }
 
-        items_payload = []
+        items = []
+
         for item in order.items.all():
-            details = [
-                {"name": "package_code", "values": str(getattr(item, 'package_code', '123456'))},
-                {"name": "quantity", "values": str(item.quantity)},
-                {"name": "discount", "values": str(getattr(item, 'discount', 0))}
-            ]
+            details = []
 
-            if getattr(item, 'mark_code', None):
-                details.append({"name": "mark_code", "values": str(item.mark_code)})
-            if getattr(item, 'tin', None):
-                details.append({"name": "tin", "values": str(item.tin)})
+            if getattr(item, "package_code", None):
+                details.append(
+                    {
+                        "name": "package_code",
+                        "values": str(item.package_code)
+                    }
+                )
 
-            items_payload.append({
-                "items_id": str(item.items_id),
-                "code": str(item.code),  # IKPU kodi
-                "name": str(item.name),
-                "amount": int(item.amount),  # Tiyinda
-                "quantity": int(item.quantity),
-                "details": details
-            })
+            if getattr(item, "mark_code", None):
+                details.append(
+                    {
+                        "name": "mark_code",
+                        "values": str(item.mark_code)
+                    }
+                )
 
-        # Unikal request_id hosil qilish
-        unique_request_id = f"{order.id}_{int(time.time())}"
+            if getattr(item, "tin", None):
+                details.append(
+                    {
+                        "name": "tin",
+                        "values": str(item.tin)
+                    }
+                )
+
+            items.append(
+                {
+                    "items_id": str(item.items_id),
+                    "code": str(item.code),
+                    "name": str(item.name),
+                    "amount": int(item.amount),
+                    "quantity": int(item.quantity),
+                    "details": details
+                }
+            )
 
         payload = {
-            "request_id": unique_request_id,
-            "store_id": int(getattr(settings, 'ATMOS_STORE_ID', 100718)),
+            "request_id": str(int(time.time())),
+            "store_id": int(settings.ATMOS_STORE_ID),
             "expiration_time": 60,
             "account": str(order.account),
-            "amount": int(order.amount),  # Tiyinda
-            "success_url": str(getattr(settings, 'ATMOS_SUCCESS_URL', 'https://example.com/success')),
-            "items": items_payload
+            "amount": int(order.amount),
+            "success_url": settings.ATMOS_SUCCESS_URL,
+            "items": items
         }
 
-        url = f"{cls.BASE_URL}/checkout/invoice/create"
+        logger.info(payload)
 
-        print(f"\n[ATMOS PAYLOAD DEBUG]: {payload}\n")
+        response = requests.post(
+            f"{cls.BASE_URL}/checkout/invoice/create",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            },
+            json=payload,
+            timeout=30
+        )
 
-        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        logger.info(response.text)
 
-        logger.info(f"Atmos Invoice Response [{response.status_code}]: {response.text}")
-
-        if response.status_code == 200:
-            res_json = response.json()
-            if res_json.get('status', {}).get('code') == 'OK' and 'url' in res_json:
-                return res_json
-            raise Exception(f"Atmos API Error Detail: {res_json}")
-
-        raise Exception(f"Atmos Invoice Create Error: {response.status_code} - {response.text}")
+        return response.json()
