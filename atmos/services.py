@@ -1,5 +1,6 @@
 import base64
 import logging
+import time
 import requests
 from datetime import datetime, timedelta
 from django.conf import settings
@@ -41,7 +42,6 @@ class AtmosService:
 
         items_payload = []
         for item in order.items.all():
-            # OFD detallarini shakllantirish
             details = [
                 {"name": "package_code", "values": str(getattr(item, 'package_code', '123456'))},
                 {"name": "quantity", "values": str(item.quantity)},
@@ -62,13 +62,13 @@ class AtmosService:
                 "details": details
             })
 
-        # Unikal request_id hosil qilish (Atmos duplicate xatosi bermasligi uchun)
+        # Unikal request_id hosil qilish
         unique_request_id = f"{order.id}_{int(time.time())}"
 
         payload = {
             "request_id": unique_request_id,
             "store_id": int(getattr(settings, 'ATMOS_STORE_ID', 100718)),
-            "expiration_time": 60,  # Faqat expiration_time qoldirildi, expiration_date olib tashlandi
+            "expiration_time": 60,
             "account": str(order.account),
             "amount": int(order.amount),  # Tiyinda
             "success_url": str(getattr(settings, 'ATMOS_SUCCESS_URL', 'https://example.com/success')),
@@ -77,7 +77,6 @@ class AtmosService:
 
         url = f"{cls.BASE_URL}/checkout/invoice/create"
 
-        # Debug uchun payload'ni print qilib ko'ring
         print(f"\n[ATMOS PAYLOAD DEBUG]: {payload}\n")
 
         response = requests.post(url, json=payload, headers=headers, timeout=10)
