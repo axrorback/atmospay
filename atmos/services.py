@@ -1,6 +1,7 @@
 import base64
 import logging
 import requests
+from datetime import datetime, timedelta
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
@@ -55,9 +56,15 @@ class AtmosService:
                 ]
             })
 
+        # Invoisning amal qilish muddati (masalan, 60 daqiqa)
+        expiration_dt = datetime.now() + timedelta(minutes=60)
+        expiration_date_str = expiration_dt.strftime("%Y-%m-%dT%H:%M:%S")
+
         payload = {
             "request_id": str(order.id),
-            "store_id": int(getattr(settings, 'ATMOS_STORE_ID', 3)),
+            "store_id": int(getattr(settings, 'ATMOS_STORE_ID', 100718)),
+            "expiration_time": 60,
+            "expiration_date": expiration_date_str,  # YYYY-MM-DDTHH:MM:SS formatida
             "account": str(order.account),
             "amount": order.amount,
             "success_url": getattr(settings, 'ATMOS_SUCCESS_URL', 'https://example.com/success'),
@@ -67,14 +74,12 @@ class AtmosService:
         url = f"{cls.BASE_URL}/checkout/invoice/create"
         response = requests.post(url, json=payload, headers=headers, timeout=10)
 
-        # Terminal va log faylga chiqarish
         print(f"\n[ATMOS INVOICE PAYLOAD]: {payload}")
         print(f"[ATMOS INVOICE RESPONSE] Status: {response.status_code} | Body: {response.text}\n")
         logger.info(f"Atmos Invoice Response [{response.status_code}]: {response.text}")
 
         if response.status_code == 200:
             res_json = response.json()
-            # Status xatoligini yoki url yo'qligini tekshirish
             if res_json.get('status', {}).get('code') == 'OK' and 'url' in res_json:
                 return res_json
             raise Exception(f"Atmos API Error Detail: {res_json}")
