@@ -41,7 +41,7 @@ class AtmosService:
 
         items_payload = []
         for item in order.items.all():
-            # OFD detallarini shakllantirish (faqat mavjud/bo'sh bo'lmagan qiymatlarni qo'shish)
+            # OFD detallarini shakllantirish
             details = [
                 {"name": "package_code", "values": str(getattr(item, 'package_code', '123456'))},
                 {"name": "quantity", "values": str(item.quantity)},
@@ -57,27 +57,29 @@ class AtmosService:
                 "items_id": str(item.items_id),
                 "code": str(item.code),  # IKPU kodi
                 "name": str(item.name),
-                "amount": int(item.amount),  # Tiyinda (int)
-                "quantity": int(item.quantity),  # Butun son (int)
+                "amount": int(item.amount),  # Tiyinda
+                "quantity": int(item.quantity),
                 "details": details
             })
 
-        # Expiration date formatting (YYYY-MM-DDTHH:MM:SS)
-        expiration_dt = datetime.now() + timedelta(minutes=60)
-        expiration_date_str = expiration_dt.strftime("%Y-%m-%dT%H:%M:%S")
+        # Unikal request_id hosil qilish (Atmos duplicate xatosi bermasligi uchun)
+        unique_request_id = f"{order.id}_{int(time.time())}"
 
         payload = {
-            "request_id": str(order.id),
+            "request_id": unique_request_id,
             "store_id": int(getattr(settings, 'ATMOS_STORE_ID', 100718)),
-            "expiration_time": 60,
-            "expiration_date": expiration_date_str,
+            "expiration_time": 60,  # Faqat expiration_time qoldirildi, expiration_date olib tashlandi
             "account": str(order.account),
-            "amount": int(order.amount),  # Tiyinda (int)
+            "amount": int(order.amount),  # Tiyinda
             "success_url": str(getattr(settings, 'ATMOS_SUCCESS_URL', 'https://example.com/success')),
             "items": items_payload
         }
 
         url = f"{cls.BASE_URL}/checkout/invoice/create"
+
+        # Debug uchun payload'ni print qilib ko'ring
+        print(f"\n[ATMOS PAYLOAD DEBUG]: {payload}\n")
+
         response = requests.post(url, json=payload, headers=headers, timeout=10)
 
         logger.info(f"Atmos Invoice Response [{response.status_code}]: {response.text}")
