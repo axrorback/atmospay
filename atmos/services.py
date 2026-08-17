@@ -1,7 +1,9 @@
 import base64
+import logging
 import requests
 from django.conf import settings
 
+logger = logging.getLogger(__name__)
 
 class AtmosService:
     BASE_URL = "https://apigw.atmos.uz"
@@ -18,11 +20,11 @@ class AtmosService:
             'Authorization': f'Basic {encoded_credentials}'
         }
 
-        response = requests.post(
-            f"{cls.BASE_URL}/token?grant_type=client_credentials",
-            headers=headers,
-            timeout=10
-        )
+        url = f"{cls.BASE_URL}/token?grant_type=client_credentials"
+        response = requests.post(url, headers=headers, timeout=10)
+
+        print(f"\n[ATMOS TOKEN RESPONSE] Status: {response.status_code} | Body: {response.text}")
+        logger.info(f"Atmos Token Response [{response.status_code}]: {response.text}")
 
         if response.status_code == 200:
             return response.json().get('access_token')
@@ -62,13 +64,19 @@ class AtmosService:
             "items": items_payload
         }
 
-        response = requests.post(
-            f"{cls.BASE_URL}/checkout/invoice/create",
-            json=payload,
-            headers=headers,
-            timeout=10
-        )
+        url = f"{cls.BASE_URL}/checkout/invoice/create"
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+
+        # Terminal va log faylga chiqarish
+        print(f"\n[ATMOS INVOICE PAYLOAD]: {payload}")
+        print(f"[ATMOS INVOICE RESPONSE] Status: {response.status_code} | Body: {response.text}\n")
+        logger.info(f"Atmos Invoice Response [{response.status_code}]: {response.text}")
 
         if response.status_code == 200:
-            return response.json()
+            res_json = response.json()
+            # Status xatoligini yoki url yo'qligini tekshirish
+            if res_json.get('status', {}).get('code') == 'OK' and 'url' in res_json:
+                return res_json
+            raise Exception(f"Atmos API Error Detail: {res_json}")
+
         raise Exception(f"Atmos Invoice Create Error: {response.status_code} - {response.text}")
