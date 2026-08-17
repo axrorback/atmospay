@@ -37,6 +37,12 @@ class CreateOrderCheckoutView(APIView):
 
 class AtmosCallbackView(APIView):
 
+    def get(self, request):
+        return Response(
+            {"status": "ok", "message": "Atmos webhook ishlamoqda. Callback yuborish uchun POST ishlatiladi."},
+            status=status.HTTP_200_OK
+        )
+
 
     def post(self, request):
         serializer = AtmosCallbackSerializer(data=request.data)
