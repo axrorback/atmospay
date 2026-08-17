@@ -6,6 +6,7 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
+
 class AtmosService:
     BASE_URL = "https://apigw.atmos.uz"
 
@@ -24,7 +25,6 @@ class AtmosService:
         url = f"{cls.BASE_URL}/token?grant_type=client_credentials"
         response = requests.post(url, headers=headers, timeout=10)
 
-        print(f"\n[ATMOS TOKEN RESPONSE] Status: {response.status_code} | Body: {response.text}")
         logger.info(f"Atmos Token Response [{response.status_code}]: {response.text}")
 
         if response.status_code == 200:
@@ -41,22 +41,28 @@ class AtmosService:
 
         items_payload = []
         for item in order.items.all():
+            # OFD detallarini shakllantirish (faqat mavjud/bo'sh bo'lmagan qiymatlarni qo'shish)
+            details = [
+                {"name": "package_code", "values": str(getattr(item, 'package_code', '123456'))},
+                {"name": "quantity", "values": str(item.quantity)},
+                {"name": "discount", "values": str(getattr(item, 'discount', 0))}
+            ]
+
+            if getattr(item, 'mark_code', None):
+                details.append({"name": "mark_code", "values": str(item.mark_code)})
+            if getattr(item, 'tin', None):
+                details.append({"name": "tin", "values": str(item.tin)})
+
             items_payload.append({
                 "items_id": str(item.items_id),
-                "code": item.code,
-                "name": item.name,
-                "amount": item.amount,
-                "quantity": item.quantity,
-                "details": [
-                    {"name": "package_code", "values": str(item.package_code)},
-                    {"name": "mark_code", "values": str(item.mark_code or "")},
-                    {"name": "tin", "values": str(item.tin or "")},
-                    {"name": "discount", "values": str(item.discount)},
-                    {"name": "quantity", "values": str(item.quantity)}
-                ]
+                "code": str(item.code),  # IKPU kodi
+                "name": str(item.name),
+                "amount": int(item.amount),  # Tiyinda (int)
+                "quantity": int(item.quantity),  # Butun son (int)
+                "details": details
             })
 
-        # Invoisning amal qilish muddati (masalan, 60 daqiqa)
+        # Expiration date formatting (YYYY-MM-DDTHH:MM:SS)
         expiration_dt = datetime.now() + timedelta(minutes=60)
         expiration_date_str = expiration_dt.strftime("%Y-%m-%dT%H:%M:%S")
 
@@ -64,18 +70,16 @@ class AtmosService:
             "request_id": str(order.id),
             "store_id": int(getattr(settings, 'ATMOS_STORE_ID', 100718)),
             "expiration_time": 60,
-            "expiration_date": expiration_date_str,  # YYYY-MM-DDTHH:MM:SS formatida
+            "expiration_date": expiration_date_str,
             "account": str(order.account),
-            "amount": order.amount,
-            "success_url": getattr(settings, 'ATMOS_SUCCESS_URL', 'https://example.com/success'),
+            "amount": int(order.amount),  # Tiyinda (int)
+            "success_url": str(getattr(settings, 'ATMOS_SUCCESS_URL', 'https://example.com/success')),
             "items": items_payload
         }
 
         url = f"{cls.BASE_URL}/checkout/invoice/create"
         response = requests.post(url, json=payload, headers=headers, timeout=10)
 
-        print(f"\n[ATMOS INVOICE PAYLOAD]: {payload}")
-        print(f"[ATMOS INVOICE RESPONSE] Status: {response.status_code} | Body: {response.text}\n")
         logger.info(f"Atmos Invoice Response [{response.status_code}]: {response.text}")
 
         if response.status_code == 200:
