@@ -17,56 +17,61 @@ class CreateOrderCheckoutView(APIView):
 
     def post(self, request):
         serializer = CreateOrderSerializer(data=request.data)
-        if serializer.is_valid():
-            order = serializer.save()
 
-            try:
-                atmos_response = AtmosService.create_invoice(order)
+        if not serializer.is_valid():
+            return Response(
+                serializer.errors,
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-                # Terminalda Atmos javobini to'liq chiqarish
-                print("\n================= ATMOS FULL RESPONSE =================")
-                print(atmos_response)
-                print("=======================================================\n")
+        order = serializer.save()
 
-                result_data = atmos_response.get('result', {})
+        try:
+            atmos_response = AtmosService.create_invoice(order)
 
-                # Har xil kalit variantlarini qidiramiz
-                checkout_url = (
-                    atmos_response.get('url') or
-                    result_data.get('url') or
-                    atmos_response.get('checkout_url') or
-                    result_data.get('checkout_url')
+            logger.info(
+                f"ATMOS RESPONSE: {atmos_response}"
+            )
+
+            if atmos_response.get("status", {}).get("code") != "OK":
+                return Response(
+                    {
+                        "status": "error",
+                        "message": atmos_response
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
                 )
 
-                payment_id = (
-                    atmos_response.get('invoice_id') or
-                    result_data.get('invoice_id') or
-                    atmos_response.get('payment_id') or
-                    result_data.get('payment_id')
-                )
+            order.payment_id = atmos_response.get("payment_id")
+            order.token = atmos_response.get("token")
+            order.checkout_url = atmos_response.get("url")
 
-                token = (
-                    atmos_response.get('token') or
-                    result_data.get('token')
-                )
+            order.save()
 
-                order.payment_id = payment_id
-                order.token = token
-                order.checkout_url = checkout_url
-                order.save()
-
-                return Response({
+            return Response(
+                {
                     "status": "success",
                     "account": order.account,
-                    "checkout_url": order.checkout_url,
-                    "raw_atmos_response": atmos_response  # Debug uchun vaqtincha javobga ham qo'shdik
-                }, status=status.HTTP_201_CREATED)
+                    "payment_id": order.payment_id,
+                    "token": order.token,
+                    "checkout_url": order.checkout_url
+                },
+                status=status.HTTP_201_CREATED
+            )
 
-            except Exception as e:
-                logger.error(f"Atmos Invoice Error: {str(e)}")
-                return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:
+            logger.exception(exc)
 
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            order.status = "failed"
+            order.save()
+
+            return Response(
+                {
+                    "status": "error",
+                    "message": str(exc)
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
 
 class AtmosCallbackView(APIView):
