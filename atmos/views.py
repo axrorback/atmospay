@@ -18,9 +18,13 @@ class CreateOrderCheckoutView(APIView):
             try:
                 atmos_response = AtmosService.create_invoice(order)
 
-                order.payment_id = atmos_response.get('payment_id')
-                order.token = atmos_response.get('token')
-                order.checkout_url = atmos_response.get('url')
+                result_data = atmos_response.get('result', {})
+
+                order.payment_id = result_data.get('invoice_id') or result_data.get('payment_id') or atmos_response.get(
+                    'payment_id')
+                order.token = result_data.get('token') or atmos_response.get('token')
+                order.checkout_url = result_data.get('url') or atmos_response.get('url')
+
                 order.save()
 
                 return Response({
