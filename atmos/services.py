@@ -6,8 +6,13 @@ from datetime import datetime, timedelta
 import uuid
 from django.conf import settings
 
-logger = logging.getLogger(__name__)
-
+logger.info(
+    json.dumps(
+        payload,
+        ensure_ascii=False,
+        indent=4
+    )
+)
 
 class AtmosService:
     BASE_URL = "https://apigw.atmos.uz"
