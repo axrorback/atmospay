@@ -111,3 +111,5 @@ ATMOS_CONSUMER_SECRET = os.getenv('ATMOS_CONSUMER_SECRET')
 ATMOS_STORE_ID = os.getenv('ATMOS_STORE_ID')
 
 ATMOS_API_KEY = os.getenv('ATMOS_API_KEY')
+
+ATMOS_SUCCESS_URL = "https://atmos.axror.tech/success/"
