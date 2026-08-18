@@ -8,6 +8,11 @@ from .serializers import CreateOrderSerializer, AtmosCallbackSerializer
 from .services import AtmosService
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 class CreateOrderCheckoutView(APIView):
 
     def post(self, request):
@@ -18,22 +23,47 @@ class CreateOrderCheckoutView(APIView):
             try:
                 atmos_response = AtmosService.create_invoice(order)
 
+                # Terminalda Atmos javobini to'liq chiqarish
+                print("\n================= ATMOS FULL RESPONSE =================")
+                print(atmos_response)
+                print("=======================================================\n")
+
                 result_data = atmos_response.get('result', {})
 
-                order.payment_id = result_data.get('invoice_id') or result_data.get('payment_id') or atmos_response.get(
-                    'payment_id')
-                order.token = result_data.get('token') or atmos_response.get('token')
-                order.checkout_url = result_data.get('url') or atmos_response.get('url')
+                # Har xil kalit variantlarini qidiramiz
+                checkout_url = (
+                    atmos_response.get('url') or
+                    result_data.get('url') or
+                    atmos_response.get('checkout_url') or
+                    result_data.get('checkout_url')
+                )
 
+                payment_id = (
+                    atmos_response.get('invoice_id') or
+                    result_data.get('invoice_id') or
+                    atmos_response.get('payment_id') or
+                    result_data.get('payment_id')
+                )
+
+                token = (
+                    atmos_response.get('token') or
+                    result_data.get('token')
+                )
+
+                order.payment_id = payment_id
+                order.token = token
+                order.checkout_url = checkout_url
                 order.save()
 
                 return Response({
                     "status": "success",
                     "account": order.account,
-                    "checkout_url": order.checkout_url
+                    "checkout_url": order.checkout_url,
+                    "raw_atmos_response": atmos_response  # Debug uchun vaqtincha javobga ham qo'shdik
                 }, status=status.HTTP_201_CREATED)
 
             except Exception as e:
+                logger.error(f"Atmos Invoice Error: {str(e)}")
                 return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
