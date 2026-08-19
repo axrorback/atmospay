@@ -17,65 +17,51 @@ from .services import AtmosService
 logger = logging.getLogger(__name__)
 
 
-class CreateOrderCheckoutView(
-    APIView
-):
+class CreateOrderCheckoutView(APIView):
 
     def post(self, request):
 
-        serializer = (
-            CreateOrderSerializer(
-                data=request.data
-            )
+        serializer = CreateOrderSerializer(
+            data=request.data
         )
 
-        serializer.is_valid(
-            raise_exception=True
-        )
+        serializer.is_valid(raise_exception=True)
 
         order = serializer.save()
 
         try:
 
-            invoice = (
-                AtmosService.create_invoice(
-                    order
-                )
-            )
+            invoice = AtmosService.create_invoice(order)
 
-            order.payment_id = (
-                invoice["payment_id"]
-            )
+            # ✅ LOGGING QO'SHILDI
+            logger.info(f"Atmos Response: {invoice}")
+            logger.info(f"Response Keys: {invoice.keys()}")
 
-            order.token = (
-                invoice["token"]
-            )
+            # ✅ TEKSHIRING - bo'sh bo'lsami?
+            if not invoice.get("payment_id"):
+                logger.error(f"payment_id yo'q! Full response: {invoice}")
+                raise ValueError("Atmos API payment_id qaytarmadi")
 
-            order.checkout_url = (
-                invoice["url"]
-            )
-
+            order.payment_id = invoice["payment_id"]
+            order.token = invoice["token"]
+            order.checkout_url = invoice["url"]
             order.save()
 
             return Response(
                 {
                     "status": "success",
-                    "order_id": (
-                        order.account
-                    ),
-                    "checkout_url": (
-                        order.checkout_url
-                    ),
+                    "order_id": order.id,
+                    "payment_id": order.payment_id,
+                    "checkout_url": order.checkout_url,
                 },
                 status=status.HTTP_201_CREATED,
             )
 
         except Exception as exc:
 
-            logger.exception(exc)
+            logger.exception(f"Error creating invoice: {exc}")
 
             order.status = "failed"
-
             order.save()
 
             return Response(
