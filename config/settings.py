@@ -103,6 +103,7 @@ USE_TZ = True
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
+ATMOS_BASE_URL = os.getenv('ATMOS_BASE_URL')
 
 ATMOS_CONSUMER_KEY = os.getenv('ATMOS_CONSUMER_KEY')
 
