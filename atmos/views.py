@@ -23,32 +23,26 @@ logger = logging.getLogger(__name__)
 class CreateOrderCheckoutView(APIView):
 
     def post(self, request):
-        """
-        Direct Atmos integration - serializer va service siz
-        """
-
-        global order
+        """Direct Atmos integration"""
+        order = None
         try:
-            # 📥 Client'dan kelgan data
             data = request.data
             account = data.get("account")
             amount = data.get("amount")
             items = data.get("items", [])
 
-            # ✅ Validation
             if not all([account, amount, items]):
                 return Response(
-                    {"status": "error", "message": "account, amount, items majburiy"},
+                    {
+                        "status": "error",
+                        "message": "account, amount, items majburiy",
+                    },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            # 💾 Order va OrderItem'larni saqlang (database)
-            order = Order.objects.create(
-                account=account,
-                amount=amount
-            )
+            # 1. Order va OrderItem'larni yaratish
+            order = Order.objects.create(account=account, amount=amount)
 
-            # OrderItem'larni saqlang
             for item in items:
                 OrderItem.objects.create(
                     order=order,
@@ -63,7 +57,10 @@ class CreateOrderCheckoutView(APIView):
                     discount=item.get("discount", 0),
                 )
 
-            credentials = f"{settings.ATMOS_CONSUMER_KEY}:{settings.ATMOS_CONSUMER_SECRET}"
+            # 2. Access Token olish
+            credentials = (
+                f"{settings.ATMOS_CONSUMER_KEY}:{settings.ATMOS_CONSUMER_SECRET}"
+            )
             encoded = base64.b64encode(credentials.encode()).decode()
 
             token_response = requests.post(
@@ -74,63 +71,54 @@ class CreateOrderCheckoutView(APIView):
             token_response.raise_for_status()
             access_token = token_response.json()["access_token"]
 
+            # 3. Atmos uchun Items tayyorlash
             atmos_items = []
             for item in order.items.all():
                 atmos_item = {
-                    "items_id": item.items_id,
+                    "items_id": str(item.items_id),
                     "name": item.name,
-                    "amount": item.amount,
-                    "quantity": item.quantity,
+                    "amount": int(item.amount),
+                    "quantity": int(item.quantity),
                 }
 
-                details_list = []
+                # Atmos namunasiga mos 'details' OBYEKTI (Array emas)
+                # Kerakli key/value juftligini shakllantirish:
+                details_key = (
+                    item.package_code
+                    or item.mark_code
+                    or item.tin
+                    or "item_info"
+                )
+                details_val = (
+                    str(item.discount)
+                    if item.discount
+                    else (item.code or "none")
+                )
 
-                if item.package_code:
-                    details_list.append({
-                        "name": "package_code",
-                        "values": item.package_code
-                    })
-
-                if item.mark_code:
-                    details_list.append({
-                        "name": "mark_code",
-                        "values": item.mark_code
-                    })
-
-                if item.tin:
-                    details_list.append({
-                        "name": "tin",
-                        "values": item.tin
-                    })
-
-                if item.discount:
-                    details_list.append({
-                        "name": "discount",
-                        "values": str(item.discount)
-                    })
-
-                # ✅ Array bo'lsa qo'shish
-                if details_list:
-                    atmos_item["details"] = details_list
+                atmos_item["details"] = {
+                    "name": str(details_key),
+                    "values": str(details_val),
+                }
 
                 atmos_items.append(atmos_item)
 
-            # ✅ Payload
+            # 4. Payload tayyorlash
             payload = {
                 "request_id": str(uuid.uuid4()),
-                "store_id": settings.ATMOS_STORE_ID,
+                "store_id": int(settings.ATMOS_STORE_ID),
                 "expiration_time": 10,
                 "expiration_date": (
-                        datetime.now() + timedelta(minutes=10)
+                    datetime.now() + timedelta(minutes=10)
                 ).strftime("%Y-%m-%dT%H:%M:%S"),
                 "account": account,
-                "amount": amount,
+                "amount": int(amount),
                 "success_url": settings.ATMOS_SUCCESS_URL,
                 "items": atmos_items,
             }
 
-            logger.info(f"Atmos'ga yuborilyotgan payload: {payload}")
+            logger.info(f"Atmos payload: {payload}")
 
+            # 5. Atmos API'ga yuborish
             atmos_response = requests.post(
                 f"{settings.ATMOS_BASE_URL}/checkout/invoice/create",
                 headers={
@@ -144,27 +132,25 @@ class CreateOrderCheckoutView(APIView):
             atmos_response.raise_for_status()
             invoice_data = atmos_response.json()
 
-            logger.info(f"Atmos javob: {invoice_data}")
+            logger.info(f"Atmos response: {invoice_data}")
 
             if invoice_data.get("status", {}).get("code") != "0":
-                error_msg = invoice_data.get("status", {}).get("description", "Unknown error")
-                logger.error(f"Atmos error: {error_msg}")
-
+                error_msg = invoice_data.get("status", {}).get(
+                    "description", "Unknown error"
+                )
                 order.status = "failed"
                 order.save()
-
                 return Response(
                     {"status": "error", "message": error_msg},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+            # 6. Order statusini update qilish
             order.payment_id = invoice_data.get("payment_id")
             order.token = invoice_data.get("token")
             order.checkout_url = invoice_data.get("url")
             order.status = "pending"
             order.save()
-
-            logger.info(f"✅ Order #{order.id} successfully created: {order.checkout_url}")
 
             return Response(
                 {
@@ -179,11 +165,9 @@ class CreateOrderCheckoutView(APIView):
 
         except requests.exceptions.RequestException as e:
             logger.exception(f"Atmos API error: {str(e)}")
-
-            if 'order' in locals():
+            if order:
                 order.status = "failed"
                 order.save()
-
             return Response(
                 {"status": "error", "message": f"Atmos API error: {str(e)}"},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -191,11 +175,9 @@ class CreateOrderCheckoutView(APIView):
 
         except Exception as e:
             logger.exception(f"Unexpected error: {str(e)}")
-
-            if 'order' in locals():
+            if order:
                 order.status = "failed"
                 order.save()
-
             return Response(
                 {"status": "error", "message": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
