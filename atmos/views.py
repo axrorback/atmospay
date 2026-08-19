@@ -1,11 +1,14 @@
+import base64
 import logging
 
+import requests
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
-from .models import Order
-
+import uuid
+from config import settings
+from .models import Order, OrderItem
+from datetime import datetime, timedelta
 from .serializers import (
     CreateOrderSerializer,
     AtmosCallbackSerializer,
@@ -20,59 +23,182 @@ logger = logging.getLogger(__name__)
 class CreateOrderCheckoutView(APIView):
 
     def post(self, request):
+        """
+        Direct Atmos integration - serializer va service siz
+        """
 
-        serializer = CreateOrderSerializer(
-            data=request.data
-        )
-
-        serializer.is_valid(raise_exception=True)
-
-        order = serializer.save()
-
+        global order
         try:
+            # 📥 Client'dan kelgan data
+            data = request.data
+            account = data.get("account")
+            amount = data.get("amount")
+            items = data.get("items", [])
 
-            invoice = AtmosService.create_invoice(order)
+            # ✅ Validation
+            if not all([account, amount, items]):
+                return Response(
+                    {"status": "error", "message": "account, amount, items majburiy"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-            # ✅ LOGGING QO'SHILDI
-            logger.info(f"Atmos Response: {invoice}")
-            logger.info(f"Response Keys: {invoice.keys()}")
+            # 💾 Order va OrderItem'larni saqlang (database)
+            order = Order.objects.create(
+                account=account,
+                amount=amount
+            )
 
-            # ✅ TEKSHIRING - bo'sh bo'lsami?
-            if not invoice.get("payment_id"):
-                logger.error(f"payment_id yo'q! Full response: {invoice}")
-                raise ValueError("Atmos API payment_id qaytarmadi")
+            # OrderItem'larni saqlang
+            for item in items:
+                OrderItem.objects.create(
+                    order=order,
+                    items_id=item.get("items_id"),
+                    name=item.get("name"),
+                    amount=item.get("amount"),
+                    quantity=item.get("quantity", 1),
+                    code=item.get("code"),
+                    package_code=item.get("package_code"),
+                    mark_code=item.get("mark_code"),
+                    tin=item.get("tin"),
+                    discount=item.get("discount", 0),
+                )
 
-            order.payment_id = invoice["payment_id"]
-            order.token = invoice["token"]
-            order.checkout_url = invoice["url"]
+            credentials = f"{settings.ATMOS_CONSUMER_KEY}:{settings.ATMOS_CONSUMER_SECRET}"
+            encoded = base64.b64encode(credentials.encode()).decode()
+
+            token_response = requests.post(
+                f"{settings.ATMOS_BASE_URL}/token?grant_type=client_credentials",
+                headers={"Authorization": f"Basic {encoded}"},
+                timeout=10,
+            )
+            token_response.raise_for_status()
+            access_token = token_response.json()["access_token"]
+
+            atmos_items = []
+            for item in order.items.all():
+                # details array'ni yasang
+                details = []
+
+                if item.package_code:
+                    details.append({
+                        "name": "package_code",
+                        "values": str(item.package_code),
+                    })
+
+                if item.mark_code:
+                    details.append({
+                        "name": "mark_code",
+                        "values": str(item.mark_code),
+                    })
+
+                if item.tin:
+                    details.append({
+                        "name": "tin",
+                        "values": str(item.tin),
+                    })
+
+                if item.discount:
+                    details.append({
+                        "name": "discount",
+                        "values": str(item.discount),
+                    })
+
+                atmos_item = {
+                    "items_id": item.items_id,
+                    "name": item.name,
+                    "amount": item.amount,
+                    "quantity": item.quantity,
+                }
+
+                if details:
+                    atmos_item["details"] = details
+
+                atmos_items.append(atmos_item)
+
+            payload = {
+                "request_id": str(uuid.uuid4()),
+                "store_id": settings.ATMOS_STORE_ID,
+                "expiration_time": 10,
+                "expiration_date": (
+                        datetime.now() + timedelta(minutes=10)
+                ).strftime("%Y-%m-%dT%H:%M:%S"),
+                "account": account,
+                "amount": amount,
+                "success_url": settings.ATMOS_SUCCESS_URL,
+                "items": atmos_items,
+            }
+
+            logger.info(f"Atmos'ga yuborilyotgan payload: {payload}")
+
+            atmos_response = requests.post(
+                f"{settings.ATMOS_BASE_URL}/checkout/invoice/create",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=30,
+            )
+
+            atmos_response.raise_for_status()
+            invoice_data = atmos_response.json()
+
+            logger.info(f"Atmos javob: {invoice_data}")
+
+            if invoice_data.get("status", {}).get("code") != "0":
+                error_msg = invoice_data.get("status", {}).get("description", "Unknown error")
+                logger.error(f"Atmos error: {error_msg}")
+
+                order.status = "failed"
+                order.save()
+
+                return Response(
+                    {"status": "error", "message": error_msg},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            order.payment_id = invoice_data.get("payment_id")
+            order.token = invoice_data.get("token")
+            order.checkout_url = invoice_data.get("url")
+            order.status = "pending"
             order.save()
+
+            logger.info(f"✅ Order #{order.id} successfully created: {order.checkout_url}")
 
             return Response(
                 {
                     "status": "success",
                     "order_id": order.id,
+                    "account": order.account,
                     "payment_id": order.payment_id,
                     "checkout_url": order.checkout_url,
                 },
                 status=status.HTTP_201_CREATED,
             )
 
-        except Exception as exc:
+        except requests.exceptions.RequestException as e:
+            logger.exception(f"Atmos API error: {str(e)}")
 
-            logger.exception(f"Error creating invoice: {exc}")
-
-            order.status = "failed"
-            order.save()
+            if 'order' in locals():
+                order.status = "failed"
+                order.save()
 
             return Response(
-                {
-                    "status": "error",
-                    "message": str(exc),
-                },
-                status=status.HTTP_400_BAD_REQUEST,
+                {"status": "error", "message": f"Atmos API error: {str(e)}"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
+        except Exception as e:
+            logger.exception(f"Unexpected error: {str(e)}")
 
+            if 'order' in locals():
+                order.status = "failed"
+                order.save()
+
+            return Response(
+                {"status": "error", "message": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 class AtmosCallbackView(
     APIView
 ):
