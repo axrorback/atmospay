@@ -118,7 +118,7 @@ class CreateOrderCheckoutView(APIView):
                 "account": str(order.account),
                 "amount": int(order.amount),
                 "success_url": settings.ATMOS_SUCCESS_URL,
-                "items": atmos_items,
+                "items": [atmos_items],
             }
 
             logger.info(f"Atmos Request Payload: {payload}")
