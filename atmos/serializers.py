@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from .models import Order
 from .models import OrderItem
 
+
 class OrderItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = OrderItem
@@ -13,49 +14,46 @@ class OrderItemSerializer(serializers.ModelSerializer):
             "name",
             "amount",
             "quantity",
+            "code",
+            "package_code",
+            "mark_code",
+            "tin",
+            "discount",
         )
+        extra_kwargs = {
+            'code': {'required': False, 'allow_null': True},
+            'package_code': {'required': False, 'allow_null': True},
+            'mark_code': {'required': False, 'allow_null': True},
+            'tin': {'required': False, 'allow_null': True},
+        }
 
 
 class CreateOrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True)
 
-    # ✅ Bu fieldlarni qo'shish
-    request_id = serializers.SerializerMethodField()
-    store_id = serializers.SerializerMethodField()
-    expiration_time = serializers.SerializerMethodField()
-    expiration_date = serializers.SerializerMethodField()
-    success_url = serializers.SerializerMethodField()
-
     class Meta:
         model = Order
         fields = (
-            "request_id",
-            "store_id",
-            "expiration_time",
-            "expiration_date",
             "account",
             "amount",
-            "success_url",
             "items",
         )
 
-    def get_request_id(self, obj):
-        return str(uuid.uuid4())
+    def create(self, validated_data):
+        # ✅ items'ni olib chiqing
+        items_data = validated_data.pop("items", [])
 
-    def get_store_id(self, obj):
-        return settings.ATMOS_STORE_ID
+        # ✅ Order yarating
+        order = Order.objects.create(**validated_data)
 
-    def get_expiration_time(self, obj):
-        return 10
+        # ✅ OrderItem'larni yarating
+        order_items = [
+            OrderItem(order=order, **item)
+            for item in items_data
+        ]
+        OrderItem.objects.bulk_create(order_items)
 
-    def get_expiration_date(self, obj):
-        return (
-                datetime.now()
-                + timedelta(minutes=10)
-        ).strftime("%Y-%m-%dT%H:%M:%S")
-
-    def get_success_url(self, obj):
-        return settings.ATMOS_SUCCESS_URL
+        return order
 
 class AtmosCallbackSerializer(
     serializers.Serializer
