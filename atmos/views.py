@@ -110,7 +110,7 @@ class CreateOrderCheckoutView(APIView):
 
             payload = {
                 "request_id": str(uuid.uuid4()),
-                "store_id": int(settings.ATMOS_STORE_ID),
+                "store_id": int(100718),
                 "expiration_time": 10,
                 "expiration_date": (
                     datetime.now() + timedelta(minutes=10)
