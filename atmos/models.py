@@ -30,11 +30,11 @@ class OrderItem(models.Model):
     order = models.ForeignKey(Order, related_name='items', on_delete=models.CASCADE)
     items_id = models.CharField(max_length=64)
     code = models.CharField(max_length=64, help_text="IKPU / ИКПУ kod",null=True, blank=True)
-    name = models.CharField(max_length=255)
+    name = models.CharField(max_length=255,null=True, blank=True)
     amount = models.BigIntegerField(help_text="Birlik narxi tiyinda")
     quantity = models.IntegerField(default=1)
 
-    package_code = models.CharField(max_length=64, help_text="Kod upakovki")
+    package_code = models.CharField(max_length=64, help_text="Kod upakovki",null=True, blank=True)
     mark_code = models.CharField(max_length=255, null=True, blank=True, help_text="Kod markirovki")
     tin = models.CharField(max_length=32, null=True, blank=True, help_text="INN/PINFL")
     discount = models.BigIntegerField(default=0, help_text="Chegirma tiyinda")
