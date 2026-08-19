@@ -1,133 +1,210 @@
-import hashlib
-from django.conf import settings
-from rest_framework.views import APIView
-from rest_framework.response import Response
+import logging
+
 from rest_framework import status
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
 from .models import Order
-from .serializers import CreateOrderSerializer, AtmosCallbackSerializer
+
+from .serializers import (
+    CreateOrderSerializer,
+    AtmosCallbackSerializer,
+)
+
 from .services import AtmosService
 
-
-import logging
 
 logger = logging.getLogger(__name__)
 
 
-class CreateOrderCheckoutView(APIView):
+class CreateOrderCheckoutView(
+    APIView
+):
 
     def post(self, request):
-        serializer = CreateOrderSerializer(data=request.data)
 
-        if not serializer.is_valid():
-            return Response(
-                serializer.errors,
-                status=status.HTTP_400_BAD_REQUEST
+        serializer = (
+            CreateOrderSerializer(
+                data=request.data
             )
+        )
+
+        serializer.is_valid(
+            raise_exception=True
+        )
 
         order = serializer.save()
 
         try:
-            atmos_response = AtmosService.create_invoice(order)
 
-            logger.info(
-                f"ATMOS RESPONSE: {atmos_response}"
+            invoice = (
+                AtmosService.create_invoice(
+                    order
+                )
             )
 
-            if atmos_response.get("status", {}).get("code") != "OK":
-                return Response(
-                    {
-                        "status": "error",
-                        "message": atmos_response
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+            order.payment_id = (
+                invoice["payment_id"]
+            )
 
-            order.payment_id = atmos_response.get("payment_id")
-            order.token = atmos_response.get("token")
-            order.checkout_url = atmos_response.get("url")
+            order.token = (
+                invoice["token"]
+            )
+
+            order.checkout_url = (
+                invoice["url"]
+            )
 
             order.save()
 
             return Response(
                 {
                     "status": "success",
-                    "account": order.account,
-                    "payment_id": order.payment_id,
-                    "token": order.token,
-                    "checkout_url": order.checkout_url
+                    "order_id": (
+                        order.account
+                    ),
+                    "checkout_url": (
+                        order.checkout_url
+                    ),
                 },
-                status=status.HTTP_201_CREATED
+                status=status.HTTP_201_CREATED,
             )
 
         except Exception as exc:
+
             logger.exception(exc)
 
             order.status = "failed"
+
             order.save()
 
             return Response(
                 {
                     "status": "error",
-                    "message": str(exc)
+                    "message": str(exc),
                 },
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
 
-class AtmosCallbackView(APIView):
+class AtmosCallbackView(
+    APIView
+):
 
-    def get(self, request):
-        return Response(
-            {"status": "ok", "message": "Atmos webhook ishlamoqda. Callback yuborish uchun POST ishlatiladi."},
-            status=status.HTTP_200_OK
-        )
+    authentication_classes = []
 
+    permission_classes = []
 
     def post(self, request):
-        serializer = AtmosCallbackSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response({"status": 0, "message": "Noto'g'ri so'rov formati"}, status=status.HTTP_200_OK)
 
-        data = serializer.validated_data
-        store_id = str(data['store_id'])
-        transaction_id = str(data['transaction_id'])
-        invoice = str(data['invoice'])
-        amount = str(data['amount'])
-        sign = data['sign']
+        serializer = (
+            AtmosCallbackSerializer(
+                data=request.data
+            )
+        )
 
-        api_key = getattr(settings, 'ATMOS_API_KEY', '')
-        sign_string = f"{store_id}{transaction_id}{invoice}{amount}{api_key}"
-        calculated_sign = hashlib.md5(sign_string.encode('utf-8')).hexdigest()
+        if (
+            not serializer.is_valid()
+        ):
 
-        if calculated_sign.lower() != sign.lower():
-            return Response({
-                "status": 0,
-                "message": "Raqamli imzo (sign) xatosi"
-            }, status=status.HTTP_200_OK)
+            return Response(
+                {
+                    "status": 0,
+                    "message": (
+                        "Invalid request"
+                    ),
+                }
+            )
+
+        data = (
+            serializer.validated_data
+        )
+
+        is_valid = (
+            AtmosService.validate_sign(
+                store_id=data[
+                    "store_id"
+                ],
+                transaction_id=data[
+                    "transaction_id"
+                ],
+                invoice=data[
+                    "invoice"
+                ],
+                amount=data[
+                    "amount"
+                ],
+                sign=data[
+                    "sign"
+                ],
+            )
+        )
+
+        if not is_valid:
+
+            return Response(
+                {
+                    "status": 0,
+                    "message": (
+                        "Invalid sign"
+                    ),
+                }
+            )
 
         try:
-            order = Order.objects.get(account=invoice)
+
+            order = (
+                Order.objects.get(
+                    payment_id=data[
+                        "invoice"
+                    ]
+                )
+            )
+
         except Order.DoesNotExist:
-            return Response({
-                "status": 0,
-                "message": f"Инвойс с номером {invoice} отсутствует в системе"
-            }, status=status.HTTP_200_OK)
 
-        if order.amount != int(amount):
-            return Response({
-                "status": 0,
-                "message": "To'lov summasi mos kelmadi"
-            }, status=status.HTTP_200_OK)
+            return Response(
+                {
+                    "status": 0,
+                    "message": (
+                        "Invoice not found"
+                    ),
+                }
+            )
 
-        if order.status == 'paid':
-            return Response({"status": 1, "message": "Успешно"}, status=status.HTTP_200_OK)
+        if (
+            order.amount
+            != data["amount"]
+        ):
 
-        order.status = 'paid'
-        order.transaction_id = transaction_id
-        order.transaction_time = data['transaction_time']
+            return Response(
+                {
+                    "status": 0,
+                    "message": (
+                        "Amount mismatch"
+                    ),
+                }
+            )
+
+        order.status = "paid"
+
+        order.transaction_id = (
+            data[
+                "transaction_id"
+            ]
+        )
+
+        order.transaction_time = (
+            data[
+                "transaction_time"
+            ]
+        )
+
         order.save()
 
-        return Response({
-            "status": 1,
-            "message": "Успешно"
-        }, status=status.HTTP_200_OK)
+        return Response(
+            {
+                "status": 1,
+                "message": "Успешно",
+            }
+        )
