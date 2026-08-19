@@ -76,32 +76,20 @@ class CreateOrderCheckoutView(APIView):
 
             atmos_items = []
             for item in order.items.all():
-                # details array'ni yasang
-                details = []
+                # 🔧 details OBJECT yasang (ARRAY EMAS!)
+                details = {}
 
                 if item.package_code:
-                    details.append({
-                        "name": "package_code",
-                        "values": str(item.package_code),
-                    })
+                    details["package_code"] = str(item.package_code)
 
                 if item.mark_code:
-                    details.append({
-                        "name": "mark_code",
-                        "values": str(item.mark_code),
-                    })
+                    details["mark_code"] = str(item.mark_code)
 
                 if item.tin:
-                    details.append({
-                        "name": "tin",
-                        "values": str(item.tin),
-                    })
+                    details["tin"] = str(item.tin)
 
                 if item.discount:
-                    details.append({
-                        "name": "discount",
-                        "values": str(item.discount),
-                    })
+                    details["discount"] = str(item.discount)
 
                 atmos_item = {
                     "items_id": item.items_id,
@@ -115,6 +103,7 @@ class CreateOrderCheckoutView(APIView):
 
                 atmos_items.append(atmos_item)
 
+            # ✅ Payload
             payload = {
                 "request_id": str(uuid.uuid4()),
                 "store_id": settings.ATMOS_STORE_ID,
