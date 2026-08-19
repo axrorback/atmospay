@@ -94,84 +94,50 @@ class AtmosService:
 
     @classmethod
     def create_invoice(cls, order):
-
         token = cls.get_token()
-
         items = []
 
         for item in order.items.all():
-
-            details = cls.build_details(
-                item
-            )
+            details = cls.build_details(item)
 
             item_payload = {
                 "items_id": item.items_id,
                 "name": item.name,
                 "amount": item.amount,
                 "quantity": item.quantity,
-                "details": details,
             }
 
-            items.append(
-                item_payload
-            )
+            if details:
+                item_payload["details"] = details
+
+            items.append(item_payload)
 
         payload = {
-            "request_id": str(
-                uuid.uuid4()
-            ),
+            "request_id": str(uuid.uuid4()),
             "store_id": settings.ATMOS_STORE_ID,
             "expiration_time": 10,
             "expiration_date": (
-                datetime.now()
-                + timedelta(minutes=10)
-            ).strftime(
-                "%Y-%m-%dT%H:%M:%S"
-            ),
+                    datetime.now()
+                    + timedelta(minutes=10)
+            ).strftime("%Y-%m-%dT%H:%M:%S"),
             "account": order.account,
             "amount": order.amount,
-            "success_url": (
-                settings.ATMOS_SUCCESS_URL
-            ),
+            "success_url": settings.ATMOS_SUCCESS_URL,
             "items": items,
         }
 
-        logger.info(payload)
-
         response = requests.post(
-            f"{cls.BASE_URL}"
-            "/checkout/invoice/create",
+            f"{cls.BASE_URL}/checkout/invoice/create",
             headers={
-                "Authorization": (
-                    f"Bearer {token}"
-                ),
-                "Content-Type": (
-                    "application/json"
-                ),
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
             },
             json=payload,
             timeout=30,
         )
 
         response.raise_for_status()
-
-        data = response.json()
-
-        logger.info(data)
-
-        if (
-            data["status"]["code"]
-            != "0"
-        ):
-
-            raise Exception(
-                data["status"][
-                    "description"
-                ]
-            )
-
-        return data
+        return response.json()
 
     @classmethod
     def validate_sign(
