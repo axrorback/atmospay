@@ -29,7 +29,7 @@ class Order(models.Model):
 class OrderItem(models.Model):
     order = models.ForeignKey(Order, related_name='items', on_delete=models.CASCADE)
     items_id = models.CharField(max_length=64)
-    code = models.CharField(max_length=64, help_text="IKPU / ИКПУ kod")
+    code = models.CharField(max_length=64, help_text="IKPU / ИКПУ kod",null=True, blank=True)
     name = models.CharField(max_length=255)
     amount = models.BigIntegerField(help_text="Birlik narxi tiyinda")
     quantity = models.IntegerField(default=1)
