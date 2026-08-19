@@ -5,10 +5,11 @@ from .models import OrderItem
 
 
 class OrderItemSerializer(serializers.ModelSerializer):
+    code = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    package_code = serializers.CharField(required=False, allow_null=True, allow_blank=True)
 
     class Meta:
         model = OrderItem
-
         fields = (
             "items_id",
             "code",
