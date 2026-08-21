@@ -192,124 +192,55 @@ class CreateOrderCheckoutView(APIView):
                 {"status": "error", "message": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-class AtmosCallbackView(
-    APIView
-):
-
+class AtmosCallbackView(APIView):
     authentication_classes = []
-
     permission_classes = []
 
     def post(self, request):
+        serializer = AtmosCallbackSerializer(data=request.data)
 
-        serializer = (
-            AtmosCallbackSerializer(
-                data=request.data
-            )
-        )
-
-        if (
-            not serializer.is_valid()
-        ):
-
+        if not serializer.is_valid():
             return Response(
-                {
-                    "status": 0,
-                    "message": (
-                        "Invalid request"
-                    ),
-                }
+                {"status": 0, "message": "Invalid request"},
+                status=status.HTTP_200_OK
             )
 
-        data = (
-            serializer.validated_data
-        )
+        data = serializer.validated_data
 
-        is_valid = (
-            AtmosService.validate_sign(
-                store_id=data[
-                    "store_id"
-                ],
-                transaction_id=data[
-                    "transaction_id"
-                ],
-                invoice=data[
-                    "invoice"
-                ],
-                amount=data[
-                    "amount"
-                ],
-                sign=data[
-                    "sign"
-                ],
-            )
+        is_valid = AtmosService.validate_sign(
+            store_id=data["store_id"],
+            transaction_id=data["transaction_id"],
+            invoice=data["invoice"],
+            amount=data["amount"],
+            sign=data["sign"],
         )
 
         if not is_valid:
-
             return Response(
-                {
-                    "status": 0,
-                    "message": (
-                        "Invalid sign"
-                    ),
-                }
+                {"status": 0, "message": "Invalid sign"},
+                status=status.HTTP_200_OK
             )
 
         try:
-
-            order = (
-                Order.objects.get(
-                    payment_id=data[
-                        "invoice"
-                    ]
-                )
-            )
-
+            order = Order.objects.get(payment_id=str(data["invoice"]))
         except Order.DoesNotExist:
-
             return Response(
-                {
-                    "status": 0,
-                    "message": (
-                        "Invoice not found"
-                    ),
-                }
+                {"status": 0, "message": f"Инвойс с номером {data['invoice']} отсутствует в системе"},
+                status=status.HTTP_200_OK
             )
 
-        if (
-            order.amount
-            != data["amount"]
-        ):
-
+        if int(order.amount) != int(data["amount"]):
             return Response(
-                {
-                    "status": 0,
-                    "message": (
-                        "Amount mismatch"
-                    ),
-                }
+                {"status": 0, "message": "Amount mismatch"},
+                status=status.HTTP_200_OK
             )
 
         order.status = "paid"
-
-        order.transaction_id = (
-            data[
-                "transaction_id"
-            ]
-        )
-
-        order.transaction_time = (
-            data[
-                "transaction_time"
-            ]
-        )
-
+        order.transaction_id = data["transaction_id"]
+        order.transaction_time = data["transaction_time"]
         order.save()
 
         return Response(
-            {
-                "status": 1,
-                "message": "Успешно",
-            }
+            {"status": 1, "message": "Успешно"},
+            status=status.HTTP_200_OK
         )
