@@ -1,7 +1,4 @@
-import uuid
-from config import settings
 from rest_framework import serializers
-from datetime import datetime, timedelta
 from .models import Order
 from .models import OrderItem
 
@@ -40,13 +37,10 @@ class CreateOrderSerializer(serializers.ModelSerializer):
         )
 
     def create(self, validated_data):
-        # ✅ items'ni olib chiqing
         items_data = validated_data.pop("items", [])
 
-        # ✅ Order yarating
         order = Order.objects.create(**validated_data)
 
-        # ✅ OrderItem'larni yarating
         order_items = [
             OrderItem(order=order, **item)
             for item in items_data
@@ -55,18 +49,10 @@ class CreateOrderSerializer(serializers.ModelSerializer):
 
         return order
 
-class AtmosCallbackSerializer(
-    serializers.Serializer
-):
-
-    store_id = serializers.IntegerField()
-
+class AtmosCallbackSerializer(serializers.Serializer):
+    store_id = serializers.CharField()
     transaction_id = serializers.CharField()
-
-    transaction_time = serializers.DateTimeField()
-
+    transaction_time = serializers.CharField()
     amount = serializers.IntegerField()
-
-    invoice = serializers.IntegerField()
-
+    account = serializers.CharField()
     sign = serializers.CharField()
