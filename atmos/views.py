@@ -204,7 +204,7 @@ class AtmosCallbackView(APIView):
 
         serializer = AtmosCallbackSerializer(data=request.data)
         if not serializer.is_valid():
-            print(" [XATO 400]: Serializer ma'lumotlari yaroqsiz!")
+            print("❌ [XATO 400]: Serializer ma'lumotlari yaroqsiz!")
             print("DETAILS:", serializer.errors)
             return Response(
                 {"status": 0, "message": "Invalid request parameters"},
@@ -216,30 +216,30 @@ class AtmosCallbackView(APIView):
         is_valid = AtmosService.validate_sign(
             store_id=data["store_id"],
             transaction_id=data["transaction_id"],
-            invoice=data["invoice"],
+            invoice=data["account"],
             amount=data["amount"],
             sign=data["sign"],
         )
 
         if not is_valid:
-            print(" [XATO 401]: Sign (Raqamli imzo) mos kelmadi!")
+            print("❌ [XATO 401]: Sign (Raqamli imzo) mos kelmadi!")
             return Response(
                 {"status": 0, "message": "Invalid sign signature"},
                 status=status.HTTP_401_UNAUTHORIZED
             )
 
         try:
-            order = Order.objects.get(payment_id=str(data["invoice"]))
+            order = Order.objects.get(account=str(data["account"]))
         except Order.DoesNotExist:
-            print(f" [XATO 404]: Invoice №{data['invoice']} bazadan topilmadi!")
+            print(f"❌ [XATO 404]: Account/Invoice №{data['account']} bazadan topilmadi!")
             return Response(
-                {"status": 0, "message": f"Инвойс с номером {data['invoice']} отсутствует в системе"},
+                {"status": 0, "message": f"Инвойс с номером {data['account']} отсутствует в системе"},
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        print(f" Baza summasi: {order.amount} | Atmos summasi: {data['amount']}")
+        print(f"ℹ️ Baza summasi: {order.amount} | Atmos summasi: {data['amount']}")
         if float(order.amount) != float(data["amount"]):
-            print(" [XATO 422]: Buyurtma summasi va Atmos summasi teng emas!")
+            print("❌ [XATO 422]: Buyurtma summasi va Atmos summasi teng emas!")
             return Response(
                 {"status": 0, "message": "Amount mismatch"},
                 status=status.HTTP_422_UNPROCESSABLE_ENTITY
@@ -250,7 +250,7 @@ class AtmosCallbackView(APIView):
         order.transaction_time = str(data["transaction_time"])
         order.save()
 
-        print(" [SUCCESS 200]: To'lov muvaffaqiyatli saqlandi!")
+        print("✅ [SUCCESS 200]: To'lov muvaffaqiyatli saqlandi!")
         print("========================================================\n")
 
         return Response(
