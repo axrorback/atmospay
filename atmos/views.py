@@ -1,16 +1,8 @@
 import base64
 import logging
 
-import requests
-from rest_framework import status
-from rest_framework.response import Response
-from rest_framework.views import APIView
-import uuid
 from config import settings
-from .models import Order, OrderItem
-from datetime import datetime, timedelta
 from .serializers import (
-    CreateOrderSerializer,
     AtmosCallbackSerializer,
 )
 
@@ -21,7 +13,6 @@ logger = logging.getLogger(__name__)
 
 
 import base64
-import logging
 import uuid
 from datetime import datetime, timedelta
 
@@ -33,7 +24,6 @@ from rest_framework.views import APIView
 
 from .models import Order, OrderItem
 
-logger = logging.getLogger(__name__)
 
 
 class CreateOrderCheckoutView(APIView):
