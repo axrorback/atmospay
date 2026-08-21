@@ -192,17 +192,23 @@ class CreateOrderCheckoutView(APIView):
                 {"status": "error", "message": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+
 class AtmosCallbackView(APIView):
     authentication_classes = []
     permission_classes = []
 
     def post(self, request):
-        serializer = AtmosCallbackSerializer(data=request.data)
+        print("\n================ ATMOS WEBHOOK INCOMING ================")
+        print("KELGAN DATA:", request.data)
 
+        serializer = AtmosCallbackSerializer(data=request.data)
         if not serializer.is_valid():
+            print(" [XATO 400]: Serializer ma'lumotlari yaroqsiz!")
+            print("DETAILS:", serializer.errors)
             return Response(
-                {"status": 0, "message": "Invalid request"},
-                status=status.HTTP_200_OK
+                {"status": 0, "message": "Invalid request parameters"},
+                status=status.HTTP_400_BAD_REQUEST
             )
 
         data = serializer.validated_data
@@ -216,29 +222,36 @@ class AtmosCallbackView(APIView):
         )
 
         if not is_valid:
+            print(" [XATO 401]: Sign (Raqamli imzo) mos kelmadi!")
             return Response(
-                {"status": 0, "message": "Invalid sign"},
-                status=status.HTTP_200_OK
+                {"status": 0, "message": "Invalid sign signature"},
+                status=status.HTTP_401_UNAUTHORIZED
             )
 
         try:
             order = Order.objects.get(payment_id=str(data["invoice"]))
         except Order.DoesNotExist:
+            print(f" [XATO 404]: Invoice №{data['invoice']} bazadan topilmadi!")
             return Response(
                 {"status": 0, "message": f"Инвойс с номером {data['invoice']} отсутствует в системе"},
-                status=status.HTTP_200_OK
+                status=status.HTTP_404_NOT_FOUND
             )
 
-        if int(order.amount) != int(data["amount"]):
+        print(f" Baza summasi: {order.amount} | Atmos summasi: {data['amount']}")
+        if float(order.amount) != float(data["amount"]):
+            print(" [XATO 422]: Buyurtma summasi va Atmos summasi teng emas!")
             return Response(
                 {"status": 0, "message": "Amount mismatch"},
-                status=status.HTTP_200_OK
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY
             )
 
         order.status = "paid"
-        order.transaction_id = data["transaction_id"]
-        order.transaction_time = data["transaction_time"]
+        order.transaction_id = str(data["transaction_id"])
+        order.transaction_time = str(data["transaction_time"])
         order.save()
+
+        print(" [SUCCESS 200]: To'lov muvaffaqiyatli saqlandi!")
+        print("========================================================\n")
 
         return Response(
             {"status": 1, "message": "Успешно"},
