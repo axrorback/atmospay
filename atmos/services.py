@@ -139,29 +139,12 @@ class AtmosService:
         response.raise_for_status()
         return response.json()
 
-    @classmethod
-    def validate_sign(
-        cls,
-        store_id,
-        transaction_id,
-        invoice,
-        amount,
-        sign,
-    ):
+    @staticmethod
+    def validate_sign(store_id, transaction_id, invoice, amount, sign):
+        api_key = settings.ATMOS_API_KEY
 
-        raw = (
-            f"{store_id}"
-            f"{transaction_id}"
-            f"{invoice}"
-            f"{amount}"
-            f"{settings.ATMOS_API_KEY}"
-        )
+        raw_string = f"{store_id}{transaction_id}{invoice}{amount}{api_key}"
 
-        generated = hashlib.md5(
-            raw.encode()
-        ).hexdigest()
+        calculated_sign = hashlib.md5(raw_string.encode('utf-8')).hexdigest()
 
-        return (
-            generated.lower()
-            == sign.lower()
-        )
+        return calculated_sign.lower() == str(sign).lower()
