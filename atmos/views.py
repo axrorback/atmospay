@@ -274,7 +274,7 @@ class AtmosCallbackView(APIView):
                     "transaction_id": transaction_id,
                     "amount": str(order.amount),
                     "status": "paid",
-                    "paid_at": timezone.now().isoformat(),
+                    "paid_at": timezone.localtime(timezone.now()).isoformat(),
                 }
 
                 def publish_after_commit():
