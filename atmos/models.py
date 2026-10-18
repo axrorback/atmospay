@@ -9,19 +9,19 @@ class Order(models.Model):
         ('failed', 'Xatolik / Bekor qilindi'),
     )
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     account = models.CharField(max_length=64, unique=True, default=uuid.uuid4, verbose_name="Account / Order ID")
     amount = models.BigIntegerField(help_text="Summa tiyinda (masalan: 1000 sum = 100000 tiyin)")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
-
     payment_id = models.IntegerField(null=True, blank=True)
     token = models.CharField(max_length=255, null=True, blank=True)
+    return_url = models.URLField(max_length=500, null=True, blank=True)
     checkout_url = models.URLField(max_length=500, null=True, blank=True)
-
     transaction_id = models.CharField(max_length=255, null=True, blank=True)
     transaction_time = models.CharField(max_length=255, null=True, blank=True)
-
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
     def __str__(self):
         return f"Order {self.account} - {self.status}"
 
