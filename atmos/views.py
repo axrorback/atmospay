@@ -1,29 +1,21 @@
-import base64
 import logging
-
 from config import settings
-from .serializers import (
-    AtmosCallbackSerializer,
-)
-
+from .serializers import AtmosCallbackSerializer
 from .services import AtmosService
-
-
-logger = logging.getLogger(__name__)
-
-
 import base64
 import uuid
 from datetime import datetime, timedelta
-
 import requests
 from django.conf import settings
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
 from .models import Order, OrderItem
-
+from .kafka_sender import send_payment_event
+from django.utils import timezone
+from django.db import transaction
+from decimal import Decimal
+logger = logging.getLogger(__name__)
 
 
 class CreateOrderCheckoutView(APIView):
@@ -33,6 +25,7 @@ class CreateOrderCheckoutView(APIView):
         try:
             data = request.data
             amount = data.get("amount")
+            return_url = data.get("return_url")
             items = data.get("items", [])
 
             if not amount or not items:
@@ -49,6 +42,7 @@ class CreateOrderCheckoutView(APIView):
             order = Order.objects.create(
                 account=account_val,
                 amount=int(amount),
+                return_url=str(return_url),
             )
 
             # 2. OrderItem'larni saqlash
@@ -107,7 +101,7 @@ class CreateOrderCheckoutView(APIView):
                 ).strftime("%Y-%m-%dT%H:%M:%S"),
                 "account": str(order.account),
                 "amount": int(order.amount),
-                "success_url": settings.ATMOS_SUCCESS_URL,
+                "success_url": order.return_url,
                 "items": atmos_items,
             }
 
@@ -199,16 +193,16 @@ class AtmosCallbackView(APIView):
     permission_classes = []
 
     def post(self, request):
-        print("\n================ ATMOS WEBHOOK INCOMING ================")
-        print("KELGAN DATA:", request.data)
-
         serializer = AtmosCallbackSerializer(data=request.data)
+
         if not serializer.is_valid():
-            print("❌ [XATO 400]: Serializer ma'lumotlari yaroqsiz!")
-            print("DETAILS:", serializer.errors)
+            logger.warning(
+                "Invalid Atmos callback: %s",
+                serializer.errors,
+            )
             return Response(
                 {"status": 0, "message": "Invalid request parameters"},
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         data = serializer.validated_data
@@ -222,38 +216,92 @@ class AtmosCallbackView(APIView):
         )
 
         if not is_valid:
-            print("❌ [XATO 401]: Sign (Raqamli imzo) mos kelmadi!")
+            logger.warning("Invalid Atmos signature")
             return Response(
                 {"status": 0, "message": "Invalid sign signature"},
-                status=status.HTTP_401_UNAUTHORIZED
+                status=status.HTTP_401_UNAUTHORIZED,
             )
 
         try:
-            order = Order.objects.get(account=str(data["account"]))
+            with transaction.atomic():
+                order = (
+                    Order.objects
+                    .select_for_update()
+                    .get(account=str(data["account"]))
+                )
+
+
+                if Decimal(str(order.amount)) != Decimal(str(data["amount"])):
+                    return Response(
+                        {"status": 0, "message": "Amount mismatch"},
+                        status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    )
+
+                transaction_id = str(data["transaction_id"])
+
+                # Takror kelgan callback uchun idempotent ishlov.
+                if order.status == "paid":
+                    if order.transaction_id != transaction_id:
+                        logger.error(
+                            "Order already paid with another transaction: %s",
+                            order.pk,
+                        )
+                        return Response(
+                            {"status": 0, "message": "Order already paid"},
+                            status=status.HTTP_409_CONFLICT,
+                        )
+
+                    # Aynan shu tranzaksiya uchun retry:
+                    # eventni qayta publish qilishga ruxsat beramiz.
+                else:
+                    order.status = "paid"
+                    order.transaction_id = transaction_id
+                    order.transaction_time = str(
+                        data["transaction_time"]
+                    )
+                    order.save(
+                        update_fields=[
+                            "status",
+                            "transaction_id",
+                            "transaction_time",
+                        ]
+                    )
+
+                event = {
+                    "event": "payment.paid",
+                    "provider": "atmos",
+                    "order_id": str(order.id),
+                    "transaction_id": transaction_id,
+                    "amount": str(order.amount),
+                    "status": "paid",
+                    "paid_at": timezone.now().isoformat(),
+                }
+
+                def publish_after_commit():
+                    try:
+                        send_payment_event(event)
+                    except Exception:
+                        logger.exception(
+                            "Failed to publish Atmos event: order_id=%s",
+                            order.id,
+                        )
+
+                transaction.on_commit(publish_after_commit)
+
         except Order.DoesNotExist:
-            print(f"❌ [XATO 404]: Account/Invoice №{data['account']} bazadan topilmadi!")
-            return Response(
-                {"status": 0, "message": f"Инвойс с номером {data['account']} отсутствует в системе"},
-                status=status.HTTP_404_NOT_FOUND
+            logger.warning(
+                "Atmos order not found: account=%s",
+                data["account"],
             )
-
-        print(f"ℹ️ Baza summasi: {order.amount} | Atmos summasi: {data['amount']}")
-        if float(order.amount) != float(data["amount"]):
-            print("❌ [XATO 422]: Buyurtma summasi va Atmos summasi teng emas!")
             return Response(
-                {"status": 0, "message": "Amount mismatch"},
-                status=status.HTTP_422_UNPROCESSABLE_ENTITY
+                {
+                    "status": 0,
+                    "message": "Invoice not found",
+                },
+                status=status.HTTP_404_NOT_FOUND,
             )
-
-        order.status = "paid"
-        order.transaction_id = str(data["transaction_id"])
-        order.transaction_time = str(data["transaction_time"])
-        order.save()
-
-        print("✅ [SUCCESS 200]: To'lov muvaffaqiyatli saqlandi!")
-        print("========================================================\n")
 
         return Response(
             {"status": 1, "message": "Успешно"},
-            status=status.HTTP_200_OK
+            status=status.HTTP_200_OK,
         )
