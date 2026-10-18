@@ -13,7 +13,7 @@ DEBUG = False
 
 ALLOWED_HOSTS = ['atmos.axror.tech', 'localhost', '127.0.0.1']
 
-CSRF_TRUSTED_ORIGINS = ['https://atmos.axror.tech', 'http://127.0.0.1:3000']
+CSRF_TRUSTED_ORIGINS = ['https://atmos.axror.tech',]
 
 
 
@@ -112,7 +112,5 @@ ATMOS_CONSUMER_SECRET = os.getenv('ATMOS_CONSUMER_SECRET')
 ATMOS_STORE_ID = os.getenv('ATMOS_STORE_ID')
 
 ATMOS_API_KEY = os.getenv('ATMOS_API_KEY')
-
-ATMOS_SUCCESS_URL = "https://atmos.axror.tech/success/"
 
 KAFKA_BOOTSTRAP_SERVERS = ["100.68.223.81:9094"]
