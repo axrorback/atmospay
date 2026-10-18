@@ -33,6 +33,7 @@ class CreateOrderSerializer(serializers.ModelSerializer):
         fields = (
             "account",
             "amount",
+            "return_url",
             "items",
         )
 
