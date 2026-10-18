@@ -122,7 +122,7 @@ class AtmosService:
             ).strftime("%Y-%m-%dT%H:%M:%S"),
             "account": order.account,
             "amount": order.amount,
-            "success_url": settings.ATMOS_SUCCESS_URL,
+            "success_url": order.return_url,
             "items": items,
         }
 
